@@ -1,3 +1,5 @@
 *.pyc
 *.jpg
 *.png
+*.caffemodel
+
