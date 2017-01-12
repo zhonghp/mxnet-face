@@ -3,7 +3,7 @@
 # @Author: vasezhong
 # @Date:   2017-01-10 15:37:10
 # @Last Modified by:   vasezhong
-# @Last Modified time: 2017-01-11 22:44:43
+# @Last Modified time: 2017-01-12 13:14:10
 
 ts = 0.1
 epoch = 166
@@ -16,6 +16,7 @@ exts = [".jpg", ".png"]
 
 extractor = 'vgg_face' # 'lightened_cnn'  # set vgg_face when using vgg-face
 
+# innerEyesAndBottomLip # outerEyes # innerEyesAndNoseAndLipCorner # outerEyesAndNose
 landmarks = 'innerEyesAndBottomLip'
 model_prefix = r'../model/lightened_cnn/lightened_cnn_gpu'
 dlib_model_file = r'../model/dlib/shape_predictor_68_face_landmarks.dat'

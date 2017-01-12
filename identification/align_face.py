@@ -21,7 +21,9 @@ import argparse
 import cv2
 import dlib
 import numpy as np
-import os,errno
+import os
+import math
+import errno
 import random
 import shutil
 
@@ -68,6 +70,7 @@ TEMPLATE = np.float32([
 
 TPL_MIN, TPL_MAX = np.min(TEMPLATE, axis=0), np.max(TEMPLATE, axis=0)
 MINMAX_TEMPLATE = (TEMPLATE - TPL_MIN) / (TPL_MAX - TPL_MIN)
+
 
 def mkdirP(path):
     """
@@ -196,6 +199,12 @@ class AlignDlib:
     .. image:: ../images/dlib-landmark-mean.png
     """
 
+    #: Five points fit.
+    INNER_EYES_AND_NOSE_AND_LIP_CORNER = [39, 42, 30, 48, 54]
+
+    #
+    OUTER_EYES = [36, 45]
+
     #: Landmark indices corresponding to the inner eyes and bottom lip.
     INNER_EYES_AND_BOTTOM_LIP = [39, 42, 57]
 
@@ -298,12 +307,15 @@ class AlignDlib:
         if bb is None:
             if opencv_det:
                 face_cascade = cv2.CascadeClassifier(opencv_model)
-                faces = face_cascade.detectMultiScale(rgbImg, 1.1, 2, minSize=(30, 30))
+                faces = face_cascade.detectMultiScale(
+                    rgbImg, 1.1, 2, minSize=(30, 30))
                 dlib_rects = []
-                for (x,y,w,h) in faces:
-                    dlib_rects.append(dlib.rectangle(int(x), int(y), int(x+w), int(y+h)))
+                for (x, y, w, h) in faces:
+                    dlib_rects.append(dlib.rectangle(
+                        int(x), int(y), int(x + w), int(y + h)))
                     if len(faces) > 0:
-                        bb = max(dlib_rects, key=lambda rect: rect.width() * rect.height())
+                        bb = max(dlib_rects,
+                                 key=lambda rect: rect.width() * rect.height())
                     else:
                         bb = None
             else:
@@ -311,10 +323,12 @@ class AlignDlib:
             if bb is None:
                 return
             if pad is not None:
-                left = int(max(0, bb.left() - bb.width()*float(pad[0])))
-                top = int(max(0, bb.top() - bb.height()*float(pad[1])))
-                right = int(min(rgbImg.shape[1], bb.right() + bb.width()*float(pad[2])))
-                bottom = int(min(rgbImg.shape[0], bb.bottom()+bb.height()*float(pad[3])))
+                left = int(max(0, bb.left() - bb.width() * float(pad[0])))
+                top = int(max(0, bb.top() - bb.height() * float(pad[1])))
+                right = int(min(rgbImg.shape[1],
+                                bb.right() + bb.width() * float(pad[2])))
+                bottom = int(min(rgbImg.shape[0],
+                                 bb.bottom() + bb.height() * float(pad[3])))
                 bb = dlib.rectangle(left, top, right, bottom)
 
         if landmarks is None:
@@ -322,17 +336,39 @@ class AlignDlib:
 
         npLandmarks = np.float32(landmarks)
         npLandmarkIndices = np.array(landmarkIndices)
-
+        srcLandmarks = npLandmarks[npLandmarkIndices]
         dstLandmarks = imgDim * MINMAX_TEMPLATE[npLandmarkIndices]
+
+        if len(landmarkIndices) == 2:
+            inPts = np.copy(srcLandmarks).tolist()
+            outPts =np.copy(dstLandmarks).tolist()
+            s60 = math.sin(60*math.pi/180)
+            c60 = math.cos(60*math.pi/180)
+            xin = c60*(inPts[0][0] - inPts[1][0]) - s60*(inPts[0][1] - inPts[1][1]) + inPts[1][0]
+            yin = s60*(inPts[0][0] - inPts[1][0]) + c60*(inPts[0][1] - inPts[1][1]) + inPts[1][1]
+            xout = c60*(outPts[0][0] - outPts[1][0]) - s60*(outPts[0][1] - outPts[1][1]) + outPts[1][0]
+            yout = s60*(outPts[0][0] - outPts[1][0]) + c60*(outPts[0][1] - outPts[1][1]) + outPts[1][1]
+            inPts.append([xin, yin])
+            outPts.append([xout, yout])
+            srcLandmarks = np.array(inPts)
+            dstLandmarks = np.array(outPts)
+
         if ts is not None:
             # reserve more area of forehead on a face
-            dstLandmarks[(0,1),1] = dstLandmarks[(0,1),1] + imgDim * float(ts)
-            dstLandmarks[2,1] = dstLandmarks[2,1] + imgDim * float(ts) / 2
+            dstLandmarks[(0, 1), 1] = dstLandmarks[(0, 1), 1] + imgDim * float(ts)
+            dstLandmarks[2, 1] = dstLandmarks[2, 1] + imgDim * float(ts) / 2
         if not only_crop:
-            H = cv2.getAffineTransform(npLandmarks[npLandmarkIndices],dstLandmarks)
+            # print np.expand_dims(srcLandmarks, axis=0)
+            # print np.expand_dims(dstLandmarks, axis=0)
+            # H = cv2.estimateRigidTransform(
+            #     np.array([srcLandmarks], dtype=np.float32),
+            #     np.array([dstLandmarks], dtype=np.float32), fullAffine=False)
+            # print H
+            H = cv2.getAffineTransform(srcLandmarks, dstLandmarks)
             return cv2.warpAffine(rgbImg, H, (imgDim, imgDim))
         else:
-            return rgbImg[top:bottom, left:right] # crop is rgbImg[y: y + h, x: x + w]
+            # crop is rgbImg[y: y + h, x: x + w]
+            return rgbImg[top:bottom, left:right]
 
 
 def write(vals, fName):
@@ -463,13 +499,15 @@ if __name__ == '__main__':
     alignmentParser = subparsers.add_parser(
         'align', help='Align a directory of images.')
     alignmentParser.add_argument('landmarks', type=str,
-                                 choices=['outerEyesAndNose', 'innerEyesAndBottomLip'],
+                                 choices=['outerEyesAndNose',
+                                          'innerEyesAndBottomLip'],
                                  help='The landmarks to align to.')
     alignmentParser.add_argument(
         'outputDir', type=str, help="Output directory of aligned images.")
-    alignmentParser.add_argument('--pad', type=float, nargs='+', help="pad (left,top,right,bottom) for face detection region")
+    alignmentParser.add_argument('--pad', type=float, nargs='+',
+                                 help="pad (left,top,right,bottom) for face detection region")
     alignmentParser.add_argument('--ts', type=float, help="translation(,ts) the proportion position of eyes downward so that..."
-                                                        " we can reserve more area of forehead",
+                                 " we can reserve more area of forehead",
                                  default='0')
     alignmentParser.add_argument('--size', type=int, help="Default image size.",
                                  default=96)

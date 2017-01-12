@@ -3,10 +3,7 @@
 # @Author: vasezhong
 # @Date:   2017-01-10 15:24:34
 # @Last Modified by:   vasezhong
-# @Last Modified time: 2017-01-11 23:08:40
-
-import os
-import numpy as np
+# @Last Modified time: 2017-01-12 16:48:59
 
 import db
 import util
@@ -27,9 +24,18 @@ class FaceAPI:
         self.__align = AlignDlib(config.dlib_model_file)
 
     def align_face(self, img_bgr, bbox):
+        if config.landmarks == 'outerEyesAndNose':
+            landmarkIndices = AlignDlib.OUTER_EYES_AND_NOSE
+        elif config.landmarks == 'innerEyesAndBottomLip':
+            landmarkIndices = AlignDlib.INNER_EYES_AND_BOTTOM_LIP
+        elif config.landmarks == 'outerEyes':
+            landmarkIndices = AlignDlib.OUTER_EYES
+        else:
+            landmarkIndices = AlignDlib.INNER_EYES_AND_NOSE_AND_LIP_CORNER
+        print landmarkIndices
         img_rgb = util.bgr2rgb(img_bgr)
-        return self.__align.align(
-            config.face_size, img_rgb, bbox, ts=config.ts)
+        return self.__align.align(config.face_size, img_rgb, bbox,
+                                  ts=config.ts, landmarkIndices=landmarkIndices)
 
     def detect_all_faces(self, img_bgr):
         img_rgb = util.bgr2rgb(img_bgr)
@@ -59,6 +65,7 @@ class FaceAPI:
 
     def search_db(self, img_bgr, max_num=3, threshold=1e-9):
         bboxes = self.detect_all_faces(img_bgr)
+        print len(bboxes), 'faces.'
         for bbox in bboxes:
             count, score_list = self.__search_db_by_face(
                 img_bgr, bbox, max_num, threshold)
@@ -106,7 +113,9 @@ if __name__ == '__main__':
         print 'Usage: python face_api.py [db_folder] [test_folder]'
         sys.exit(-1)
 
+    import os
     import cv2
+    import time
     # file1 = sys.argv[1].strip()
     # file2 = sys.argv[2].strip()
     # img1 = cv2.imread(file1)
@@ -142,31 +151,42 @@ if __name__ == '__main__':
     test_folder = sys.argv[2].strip()
     threshold = 0.6
 
-    faceAPI = FaceAPI()
-    faceAPI.build_db(db_folder)
-    faceAPI.save_db('test.db')
+    # faceAPI = FaceAPI()
+    # faceAPI.build_db(db_folder)
+    # faceAPI.save_db('test.db')
+
+    writer = open('scores.txt', 'w')
 
     faceAPI = FaceAPI()
     faceAPI.load_db('test.db')
+    start = time.time()
     for subdir, dirs, files in os.walk(test_folder):
         for path in files:
             (label, fname) = (os.path.basename(subdir), path)
             (name, ext) = os.path.splitext(fname)
-            if ext in config.exts:
-                print label, subdir, fname
-                img_bgr = cv2.imread(os.path.join(subdir, fname))
-                for idx, result in enumerate(faceAPI.search_db(img_bgr)):
-                    bbox, count, score_list = result
-                    print count
-                    for (item, similarity) in score_list:
-                        label = item.label.encode('utf-8')
-                        print label, similarity
-                        if similarity > threshold:
-                            face_rgb = faceAPI.align_face(img_bgr, bbox)
-                            face_bgr = util.rgb2bgr(face_rgb)
-                            filename1 = name + str(idx) + '_1' + ext
-                            filename2 = label + str(idx) + '_2' + ext
-                            cv2.imwrite(os.path.join(
-                                'error', filename1), face_bgr)
-                            cv2.imwrite(os.path.join(
-                                'error', filename2), item.face_bgr)
+            if ext not in config.exts:
+                continue
+            print label, subdir, fname
+            img_bgr = cv2.imread(os.path.join(subdir, fname))
+            for idx, result in enumerate(faceAPI.search_db(img_bgr)):
+                bbox, count, score_list = result
+                print count
+                for (item, similarity) in score_list:
+                    label = item.label.encode('utf-8')
+                    if similarity <= threshold:
+                        continue
+                    print label, similarity
+                    face_rgb = faceAPI.align_face(img_bgr, bbox)
+                    face_bgr = util.rgb2bgr(face_rgb)
+                    filename1 = name + str(idx) + '_1' + ext
+                    filename2 = name + str(idx) + '_' + label + '_2' + ext
+                    writer.write(filename1 + '\t' + filename2 + '\t' + str(similarity) + '\n')
+                    cv2.imwrite(os.path.join(
+                        'error', filename1), face_bgr)
+                    cv2.imwrite(os.path.join(
+                        'error', filename2), item.face_bgr)
+
+    end = time.time()
+    print end-start, 's'
+    writer.flush()
+    writer.close()
